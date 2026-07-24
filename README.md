@@ -107,20 +107,6 @@ graph TD
 
 ---
 
-## 📸 Screenshots
-
-### Swagger UI
-
-![Swagger UI](docs/images/swagger-home.png)
-
-### Incident Analysis Example
-
-![Incident Analysis](docs/images/analyze-response.png)
-
-> *Note: UI screenshots will be updated as visual assets are added to the documentation directory.*
-
----
-
 ## 🔄 Workflow Lifecycle
 
 The execution trace from telemetry payload receipt to output validation:
