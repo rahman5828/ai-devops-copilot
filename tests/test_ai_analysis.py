@@ -150,3 +150,52 @@ def test_analyze_with_ai_requires_structured_output(monkeypatch):
     assert schema["properties"]["recommendations"]["minItems"] == 2
     assert schema["properties"]["summary"]["minLength"] == 20
     assert schema["properties"]["root_cause"]["minLength"] == 20
+
+def test_analyze_with_ai_sends_docker_incident_context(monkeypatch):
+    captured = {}
+
+    def mock_chat(**kwargs):
+        captured.update(kwargs)
+        return mock_response()
+
+    monkeypatch.setattr(provider.client, "chat", mock_chat)
+
+    incident_context = {
+        "incident": {
+            "service": "payment-service",
+            "container": "payment-service",
+            "image": "payment:latest",
+        },
+        "runtime": {
+            "status": "restarting",
+            "restart_count": 42,
+            "exit_code": 1,
+            "oom_killed": False,
+        },
+        "signals": [
+            "container_restarting",
+            "non_zero_exit",
+            "repeated_restarts",
+            "error_logs",
+        ],
+        "evidence": {
+            "logs": "ERROR Redis connection refused",
+        },
+    }
+
+    provider.analyze_with_ai(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+        cpu=0,
+        memory=0,
+        incident_context=incident_context,
+    )
+
+    user_prompt = captured["messages"][1]["content"]
+
+    assert "payment-service" in user_prompt
+    assert "payment:latest" in user_prompt
+    assert "restarting" in user_prompt
+    assert "42" in user_prompt
+    assert "Redis connection refused" in user_prompt
+    assert "repeated_restarts" in user_prompt

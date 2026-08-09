@@ -1,3 +1,6 @@
+import json
+from typing import Any
+
 from app.ai.ollama_client import client
 from app.ai.prompts import SYSTEM_PROMPT
 
@@ -7,37 +10,61 @@ def analyze_with_ai(
     logs: str,
     cpu: float,
     memory: float,
+    incident_context: dict[str, Any] | None = None,
 ) -> str:
+    """
+    Analyze a DevOps incident using the local AI provider.
+
+    If structured incident_context is supplied, it is used directly.
+    Otherwise, a backward-compatible context is built from the
+    traditional service/CPU/memory/log inputs.
+    """
+
+    if incident_context is None:
+        incident_context = {
+            "incident": {
+                "service": service,
+            },
+            "metrics": {
+                "cpu": f"{cpu}%",
+                "memory": f"{memory}%",
+            },
+            "evidence": {
+                "logs": logs,
+            },
+        }
+
+    context_json = json.dumps(
+        incident_context,
+        indent=2,
+        ensure_ascii=False,
+    )
+
     prompt = f"""
-Analyze the following DevOps incident and determine the most likely cause.
+Analyze the following DevOps incident using only the evidence provided.
 
-Service:
-{service}
+Incident context:
 
-CPU Usage:
-{cpu}%
-
-Memory Usage:
-{memory}%
-
-Relevant Logs:
-{logs}
+{context_json}
 
 Analysis requirements:
 
-1. Identify the most likely root cause from the evidence provided.
-2. Base the root cause on specific log messages, errors, exceptions,
-   resource metrics, or other observable signals.
-3. Do not invent infrastructure components, errors, or events that are
-   not supported by the input.
-4. Write a concise but meaningful incident summary.
-5. Provide practical troubleshooting or remediation recommendations.
-6. If an error or failure is present in the logs, the root_cause MUST
-   explain what that failure indicates.
-7. recommendations MUST contain at least 2 actionable items.
+1. Identify the most likely root cause from the evidence.
+2. Base conclusions on observable signals, logs, runtime state, and metrics.
+3. Do not invent infrastructure components, failures, or events.
+4. Clearly distinguish evidence from inference.
+5. Provide a concise incident summary.
+6. Explain what the observed failure indicates.
+7. Provide at least 2 actionable recommendations.
 8. Do not leave root_cause empty.
 9. Do not leave recommendations empty.
 10. Use "low" severity only when there is no meaningful incident signal.
+11. Treat the deterministic incident intelligence in the incident context as authoritative for observed severity, confidence, and impact.
+12. Do not downgrade a deterministic "high" or "critical" severity to "low".
+13. Base the root cause on observable evidence from logs, runtime state, signals, and metrics.
+14. Clearly distinguish observed evidence from inferred conclusions.
+15. Do not invent infrastructure components, dependencies, failures, or events that are not present in the evidence.
+16. If the evidence is insufficient to establish a precise root cause, explicitly state the uncertainty rather than inventing one.
 
 Return only the requested JSON structure.
 """
@@ -49,7 +76,12 @@ Return only the requested JSON structure.
             "properties": {
                 "severity": {
                     "type": "string",
-                    "enum": ["critical", "high", "medium", "low"],
+                    "enum": [
+                        "critical",
+                        "high",
+                        "medium",
+                        "low",
+                    ],
                 },
                 "summary": {
                     "type": "string",
