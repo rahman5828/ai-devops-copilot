@@ -10,11 +10,30 @@ from app.ai import provider
 
 
 def mock_response(
-    severity="high",
-    summary="Payment service is experiencing Redis connection failures.",
-    root_cause="Redis connection attempts are failing while processing payment requests.",
+    root_cause=(
+        "Redis connection attempts are failing while processing "
+        "payment requests."
+    ),
+    confidence=0.95,
+    evidence=None,
+    alternative_hypotheses=None,
     recommendations=None,
 ):
+    if evidence is None:
+        evidence = [
+            {
+                "type": "log",
+                "observation": "Redis connection refused",
+            },
+            {
+                "type": "runtime",
+                "observation": "Container exited with code 1",
+            },
+        ]
+
+    if alternative_hypotheses is None:
+        alternative_hypotheses = []
+
     if recommendations is None:
         recommendations = [
             "Verify that Redis is running and accepting connections.",
@@ -25,9 +44,10 @@ def mock_response(
         "message": {
             "content": json.dumps(
                 {
-                    "severity": severity,
-                    "summary": summary,
                     "root_cause": root_cause,
+                    "confidence": confidence,
+                    "evidence": evidence,
+                    "alternative_hypotheses": alternative_hypotheses,
                     "recommendations": recommendations,
                 }
             )
@@ -50,9 +70,9 @@ def test_analyze_with_ai_returns_model_response(monkeypatch):
 
     data = json.loads(result)
 
-    assert data["severity"] == "high"
-    assert data["summary"]
     assert data["root_cause"]
+    assert 0 <= data["confidence"] <= 1
+    assert len(data["evidence"]) >= 1
     assert len(data["recommendations"]) >= 2
 
 
@@ -142,14 +162,19 @@ def test_analyze_with_ai_requires_structured_output(monkeypatch):
     schema = captured["format"]
 
     assert schema["type"] == "object"
-    assert "severity" in schema["properties"]
-    assert "summary" in schema["properties"]
+
     assert "root_cause" in schema["properties"]
+    assert "confidence" in schema["properties"]
+    assert "evidence" in schema["properties"]
+    assert "alternative_hypotheses" in schema["properties"]
     assert "recommendations" in schema["properties"]
 
+    assert schema["properties"]["confidence"]["minimum"] == 0
+    assert schema["properties"]["confidence"]["maximum"] == 1
+    assert schema["properties"]["evidence"]["minItems"] == 1
     assert schema["properties"]["recommendations"]["minItems"] == 2
-    assert schema["properties"]["summary"]["minLength"] == 20
     assert schema["properties"]["root_cause"]["minLength"] == 20
+
 
 def test_analyze_with_ai_sends_docker_incident_context(monkeypatch):
     captured = {}

@@ -1,3 +1,5 @@
+import json
+
 from app.ai import provider
 
 
@@ -9,17 +11,47 @@ def test_ai_prompt_requires_evidence_grounded_reasoning(monkeypatch):
 
         return {
             "message": {
-                "content": """
-                {
-                    "severity": "high",
-                    "summary": "The container is repeatedly failing because Redis connections are refused.",
-                    "root_cause": "The logs show Redis connection refused errors while the container is repeatedly restarting.",
-                    "recommendations": [
-                        "Verify that the Redis service is running and reachable.",
-                        "Verify the Redis hostname and port configured for the application."
-                    ]
-                }
-                """
+                "content": json.dumps(
+                    {
+                        "root_cause": (
+                            "The logs show Redis connection refused errors "
+                            "while the container is repeatedly restarting."
+                        ),
+                        "confidence": 0.95,
+                        "evidence": [
+                            {
+                                "type": "log",
+                                "observation": (
+                                    "ERROR Redis connection refused"
+                                ),
+                            },
+                            {
+                                "type": "runtime",
+                                "observation": (
+                                    "Container is repeatedly restarting "
+                                    "with exit code 1."
+                                ),
+                            },
+                            {
+                                "type": "signal",
+                                "observation": (
+                                    "Repeated container restarts detected."
+                                ),
+                            },
+                        ],
+                        "alternative_hypotheses": [],
+                        "recommendations": [
+                            (
+                                "Verify that the Redis service is running "
+                                "and reachable."
+                            ),
+                            (
+                                "Verify the Redis hostname and port "
+                                "configured for the application."
+                            ),
+                        ],
+                    }
+                )
             }
         }
 
@@ -44,7 +76,10 @@ def test_ai_prompt_requires_evidence_grounded_reasoning(monkeypatch):
             "error_logs",
         ],
         "evidence": {
-            "logs": "Application starting\nERROR Redis connection refused",
+            "logs": (
+                "Application starting\n"
+                "ERROR Redis connection refused"
+            ),
         },
     }
 
