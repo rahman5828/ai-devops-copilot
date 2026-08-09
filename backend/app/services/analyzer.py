@@ -13,6 +13,10 @@ def analyze_incident(
     memory: int,
     logs: str,
 ) -> IncidentResponse:
+    """
+    Analyze an incident using the configured AI provider.
+    """
+
     ai_response = analyze_with_ai(
         service=service,
         logs=logs,
@@ -25,11 +29,14 @@ def analyze_incident(
     print("=====================================\n")
 
     try:
-        # Try parsing directly first (works with Ollama JSON mode)
+        # Try parsing directly first.
+        # Ollama JSON mode should normally return valid JSON.
         try:
             data = json.loads(ai_response)
+
         except json.JSONDecodeError:
-            # Fallback: extract JSON object if extra text exists
+            # Fallback in case the model returns additional text
+            # around the JSON object.
             start = ai_response.find("{")
             end = ai_response.rfind("}")
 
@@ -53,7 +60,21 @@ def analyze_incident(
 
 
 async def analyze_log_file(file: UploadFile):
-    if not file.filename.endswith((".log", ".txt")):
+    """
+    Analyze an uploaded log file.
+
+    Supported formats:
+    - .log
+    - .txt
+
+    Maximum file size:
+    - 5 MB
+    """
+
+    filename = file.filename or ""
+
+    # Validate file extension case-insensitively.
+    if not filename.lower().endswith((".log", ".txt")):
         raise HTTPException(
             status_code=400,
             detail="Only .log and .txt files are supported.",
@@ -61,18 +82,29 @@ async def analyze_log_file(file: UploadFile):
 
     content = await file.read()
 
-    if len(content) > 5 * 1024 * 1024:
+    # Maximum upload size: 5 MB.
+    max_size = 5 * 1024 * 1024
+
+    if len(content) > max_size:
         raise HTTPException(
             status_code=400,
             detail="File exceeds 5 MB limit.",
         )
 
+    # Do not send empty files to the AI provider.
+    if not content.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded log file is empty.",
+        )
+
+    # Decode safely and pass the logs through the smart log parser.
     logs = extract_relevant_logs(
         content.decode("utf-8", errors="ignore")
     )
 
     return analyze_incident(
-        service=file.filename,
+        service=filename,
         cpu=0,
         memory=0,
         logs=logs,
