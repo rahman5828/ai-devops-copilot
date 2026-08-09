@@ -2,6 +2,8 @@ from fastapi import APIRouter, File, UploadFile
 
 from app.schemas.incident_request import IncidentRequest
 from app.services.analyzer import analyze_incident, analyze_log_file
+from app.services.docker_analysis import analyze_docker_container
+
 
 router = APIRouter(tags=["Incident Analysis"])
 
@@ -21,3 +23,8 @@ async def analyze_file(
     file: UploadFile = File(...),
 ):
     return await analyze_log_file(file)
+
+
+@router.post("/analyze/docker/{container_name}")
+def analyze_docker(container_name: str):
+    return analyze_docker_container(container_name)
