@@ -1,8 +1,11 @@
 import json
 from typing import Any
 
+from pydantic import ValidationError
+
 from app.ai.ollama_client import client
 from app.ai.prompts import SYSTEM_PROMPT
+from app.schemas.rca import RootCauseAnalysis
 
 
 def analyze_with_ai(
@@ -15,9 +18,8 @@ def analyze_with_ai(
     """
     Analyze a DevOps incident using the local AI provider.
 
-    If structured incident_context is supplied, it is used directly.
-    Otherwise, a backward-compatible context is built from the
-    traditional service/CPU/memory/log inputs.
+    The model response is validated against RootCauseAnalysis before it is
+    returned to the application.
     """
 
     if incident_context is None:
@@ -51,7 +53,7 @@ Analysis requirements:
 
 1. Identify the most likely root cause from the evidence.
 2. Base conclusions on observable signals, logs, runtime state, and metrics.
-3. Do not invent infrastructure components, failures, or events.
+3. Do not invent infrastructure components, failures, dependencies, or events.
 4. Clearly distinguish evidence from inference.
 5. Provide a concise incident summary.
 6. Explain what the observed failure indicates.
@@ -59,14 +61,42 @@ Analysis requirements:
 8. Do not leave root_cause empty.
 9. Do not leave recommendations empty.
 10. Use "low" severity only when there is no meaningful incident signal.
-11. Treat the deterministic incident intelligence in the incident context as authoritative for observed severity, confidence, and impact.
-12. Do not downgrade a deterministic "high" or "critical" severity to "low".
-13. Base the root cause on observable evidence from logs, runtime state, signals, and metrics.
-14. Clearly distinguish observed evidence from inferred conclusions.
-15. Do not invent infrastructure components, dependencies, failures, or events that are not present in the evidence.
-16. If the evidence is insufficient to establish a precise root cause, explicitly state the uncertainty rather than inventing one.
+11. Treat deterministic incident intelligence as authoritative for observed severity.
+12. Do not downgrade deterministic "high" or "critical" severity to "low".
+13. Use the provided confidence from deterministic intelligence when available.
+14. Do not manufacture evidence.
+15. Every evidence item must correspond to something explicitly present in
+    the incident context.
+16. Evidence should explain why the root cause is plausible.
+17. If evidence is insufficient to establish a precise root cause, explicitly
+    state the uncertainty.
+18. Include alternative hypotheses only when reasonably supported by evidence.
+19. Do not include unsupported alternative hypotheses merely to fill the field.
+20. Return at least one supporting evidence item.
+21. Return at least two recommendations.
 
-Return only the requested JSON structure.
+Return ONLY valid JSON using exactly this structure:
+
+{{
+    "root_cause": "Most likely root cause",
+    "confidence": 0.0,
+    "evidence": [
+        {{
+            "type": "log | runtime | signal | metric",
+            "observation": "Observable evidence supporting the conclusion"
+        }}
+    ],
+    "alternative_hypotheses": [
+        {{
+            "hypothesis": "Possible alternative explanation",
+            "reason": "Why the available evidence supports considering it"
+        }}
+    ],
+    "recommendations": [
+        "Actionable recommendation",
+        "Actionable recommendation"
+    ]
+}}
 """
 
     response = client.chat(
@@ -74,22 +104,60 @@ Return only the requested JSON structure.
         format={
             "type": "object",
             "properties": {
-                "severity": {
-                    "type": "string",
-                    "enum": [
-                        "critical",
-                        "high",
-                        "medium",
-                        "low",
-                    ],
-                },
-                "summary": {
-                    "type": "string",
-                    "minLength": 20,
-                },
                 "root_cause": {
                     "type": "string",
                     "minLength": 20,
+                },
+                "confidence": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                },
+                "evidence": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "log",
+                                    "runtime",
+                                    "signal",
+                                    "metric",
+                                ],
+                            },
+                            "observation": {
+                                "type": "string",
+                                "minLength": 3,
+                            },
+                        },
+                        "required": [
+                            "type",
+                            "observation",
+                        ],
+                    },
+                },
+                "alternative_hypotheses": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "hypothesis": {
+                                "type": "string",
+                                "minLength": 3,
+                            },
+                            "reason": {
+                                "type": "string",
+                                "minLength": 3,
+                            },
+                        },
+                        "required": [
+                            "hypothesis",
+                            "reason",
+                        ],
+                    },
                 },
                 "recommendations": {
                     "type": "array",
@@ -101,9 +169,10 @@ Return only the requested JSON structure.
                 },
             },
             "required": [
-                "severity",
-                "summary",
                 "root_cause",
+                "confidence",
+                "evidence",
+                "alternative_hypotheses",
                 "recommendations",
             ],
         },
@@ -122,4 +191,14 @@ Return only the requested JSON structure.
         },
     )
 
-    return response["message"]["content"]
+    raw_content = response["message"]["content"]
+
+    try:
+        parsed = json.loads(raw_content)
+        rca = RootCauseAnalysis.model_validate(parsed)
+    except (json.JSONDecodeError, ValidationError) as exc:
+        raise ValueError(
+            "AI provider returned an invalid evidence-backed RCA response."
+        ) from exc
+
+    return rca.model_dump_json()
