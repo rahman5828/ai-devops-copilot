@@ -70,6 +70,12 @@ def create_test_session():
     return db
 
 
+def create_test_client():
+    db = create_test_session()
+    app.dependency_overrides[get_db] = lambda: db
+    return db, TestClient(app)
+
+
 def test_list_incidents_returns_persisted_incident():
     db = create_test_session()
 
@@ -246,4 +252,142 @@ def test_get_incident_rejects_invalid_id():
     )
 
     app.dependency_overrides.clear()
+    db.close()
+
+
+def test_list_incidents_filters_by_service():
+    db, client = create_test_client()
+
+    create_test_incident(db)
+
+    other = create_test_incident(db)
+    other.service = "checkout-service"
+    db.commit()
+
+    response = client.get("/incidents?service=payment-service")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["incident"]["service"] == "payment-service"
+
+    db.close()
+
+
+def test_list_incidents_filters_by_severity():
+    db, client = create_test_client()
+
+    create_test_incident(db)
+
+    other = create_test_incident(db)
+    other.severity = "critical"
+    db.commit()
+
+    response = client.get("/incidents?severity=high")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["severity"] == "high"
+
+    db.close()
+
+
+def test_list_incidents_filters_by_impact():
+    db, client = create_test_client()
+
+    create_test_incident(db)
+
+    other = create_test_incident(db)
+    other.impact = "medium"
+    db.commit()
+
+    response = client.get("/incidents?impact=high")
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+    assert data["items"][0]["impact"] == "high"
+
+    db.close()
+
+
+def test_list_incidents_combines_filters():
+    db, client = create_test_client()
+
+    create_test_incident(db)
+
+    other = create_test_incident(db)
+    other.service = "checkout-service"
+    other.severity = "critical"
+    db.commit()
+
+    response = client.get(
+        "/incidents"
+        "?service=payment-service"
+        "&severity=high"
+        "&impact=high",
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["total"] == 1
+    assert len(data["items"]) == 1
+
+    item = data["items"][0]
+
+    assert item["incident"]["service"] == "payment-service"
+    assert item["severity"] == "high"
+    assert item["impact"] == "high"
+
+    db.close()
+
+
+def test_list_incidents_rejects_invalid_severity():
+    db, client = create_test_client()
+
+    response = client.get("/incidents?severity=urgent")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "severity must be one of: low, medium, high, critical."
+    )
+
+    db.close()
+
+
+def test_list_incidents_rejects_invalid_impact():
+    db, client = create_test_client()
+
+    response = client.get("/incidents?impact=severe")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "impact must be one of: low, medium, high."
+    )
+
+    db.close()
+
+
+def test_list_incidents_rejects_empty_service():
+    db, client = create_test_client()
+
+    response = client.get("/incidents?service=%20%20%20")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == (
+        "service must not be empty."
+    )
+
     db.close()

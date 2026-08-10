@@ -64,14 +64,48 @@ class IncidentRepository:
 
         return self.db.scalar(statement)
 
+    def _filters(
+        self,
+        *,
+        service: str | None = None,
+        severity: str | None = None,
+        impact: str | None = None,
+    ) -> list:
+        filters = []
+
+        if service is not None:
+            filters.append(Incident.service == service)
+
+        if severity is not None:
+            filters.append(Incident.severity == severity)
+
+        if impact is not None:
+            filters.append(Incident.impact == impact)
+
+        return filters
+
     def list(
         self,
         *,
         limit: int = 50,
         offset: int = 0,
+        service: str | None = None,
+        severity: str | None = None,
+        impact: str | None = None,
     ) -> list[Incident]:
+        statement = select(Incident)
+
+        filters = self._filters(
+            service=service,
+            severity=severity,
+            impact=impact,
+        )
+
+        if filters:
+            statement = statement.where(*filters)
+
         statement = (
-            select(Incident)
+            statement
             .order_by(Incident.created_at.desc())
             .limit(limit)
             .offset(offset)
@@ -79,7 +113,22 @@ class IncidentRepository:
 
         return list(self.db.scalars(statement).all())
 
-    def count(self) -> int:
+    def count(
+        self,
+        *,
+        service: str | None = None,
+        severity: str | None = None,
+        impact: str | None = None,
+    ) -> int:
         statement = select(func.count()).select_from(Incident)
+
+        filters = self._filters(
+            service=service,
+            severity=severity,
+            impact=impact,
+        )
+
+        if filters:
+            statement = statement.where(*filters)
 
         return int(self.db.scalar(statement) or 0)

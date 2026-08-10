@@ -84,6 +84,9 @@ def analyze_unified(
 def get_incidents(
     limit: int = 50,
     offset: int = 0,
+    service: str | None = None,
+    severity: str | None = None,
+    impact: str | None = None,
     db: Session = Depends(get_db),
 ) -> IncidentHistoryResponse:
     """
@@ -103,10 +106,43 @@ def get_incidents(
             detail="offset must be greater than or equal to 0.",
         )
 
+    if service is not None:
+        service = service.strip()
+
+        if not service:
+            raise HTTPException(
+                status_code=400,
+                detail="service must not be empty.",
+            )
+
+    if severity is not None and severity not in {
+        "low",
+        "medium",
+        "high",
+        "critical",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="severity must be one of: low, medium, high, critical.",
+        )
+
+    if impact is not None and impact not in {
+        "low",
+        "medium",
+        "high",
+    }:
+        raise HTTPException(
+            status_code=400,
+            detail="impact must be one of: low, medium, high.",
+        )
+
     return list_incidents(
         db,
         limit=limit,
         offset=offset,
+        service=service,
+        severity=severity,
+        impact=impact,
     )
 
 
