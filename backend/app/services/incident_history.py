@@ -62,12 +62,18 @@ def list_incidents(
     *,
     limit: int = 50,
     offset: int = 0,
+    service: str | None = None,
+    severity: str | None = None,
+    impact: str | None = None,
 ) -> IncidentHistoryResponse:
     repository = IncidentRepository(db)
 
     incidents = repository.list(
         limit=limit,
         offset=offset,
+        service=service,
+        severity=severity,
+        impact=impact,
     )
 
     items = [
@@ -79,5 +85,9 @@ def list_incidents(
         items=items,
         limit=limit,
         offset=offset,
-        total=repository.count(),
+        total=repository.count(
+            service=service,
+            severity=severity,
+            impact=impact,
+        ),
     )
