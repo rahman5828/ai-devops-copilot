@@ -75,3 +75,66 @@ def test_context_prefers_existing_signals():
     )
 
     assert context["signals"] == ["precomputed_signal"]
+
+def test_context_normalizes_service_and_logs():
+    context = build_incident_context(
+        service="  payment-service  ",
+        logs="",
+    )
+
+    assert context["incident"]["service"] == "payment-service"
+    assert context["evidence"]["logs"] == ""
+    assert context["intelligence"]["severity"] == "low"
+
+
+def test_context_rejects_empty_service():
+    try:
+        build_incident_context(
+            service="   ",
+            logs="ERROR something failed",
+        )
+    except ValueError as exc:
+        assert str(exc) == "service must not be empty"
+    else:
+        raise AssertionError("Expected ValueError")
+
+
+def test_context_builds_intelligence_without_docker_evidence():
+    context = build_incident_context(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+    )
+
+    assert "runtime" not in context
+    assert "signals" not in context
+    assert context["intelligence"]["severity"] == "medium"
+
+
+def test_explicit_logs_are_authoritative_over_docker_logs():
+    evidence = make_evidence(
+        logs="Docker collected log",
+    )
+
+    context = build_incident_context(
+        service="payment-service",
+        logs="Explicit application log",
+        docker_evidence=evidence,
+    )
+
+    assert context["evidence"]["logs"] == "Explicit application log"
+
+
+def test_docker_evidence_does_not_replace_explicit_logs():
+    evidence = make_evidence(
+        logs="Docker Redis connection refused",
+    )
+
+    context = build_incident_context(
+        service="payment-service",
+        logs="Application started successfully",
+        docker_evidence=evidence,
+    )
+
+    assert context["evidence"]["logs"] == (
+        "Application started successfully"
+    )
