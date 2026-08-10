@@ -1,19 +1,31 @@
 # Python
+
 __pycache__/
 *.py[cod]
 .venv/
 
 # Environment
+
 .env
 .env.*
 
+# Application data
+
+data/
+*.db
+*.sqlite
+*.sqlite3
+
 # IDE
+
 .vscode/
 .idea/
 
 # macOS
+
 .DS_Store
 
 # Python cache
+
 .pytest_cache/
 .ruff_cache/

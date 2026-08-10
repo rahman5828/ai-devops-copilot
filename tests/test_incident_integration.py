@@ -1,10 +1,50 @@
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 from app.main import app
 from app.api.routes import incident
+from app.database.database import Base, get_db
+from app.database.models import Incident
 
 
 client = TestClient(app)
+
+
+@pytest.fixture
+def db_session():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    Base.metadata.create_all(bind=engine)
+
+    session_factory = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+    )
+
+    db = session_factory()
+
+    def override_get_db():
+        try:
+            yield db
+        finally:
+            pass
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        yield db
+    finally:
+        app.dependency_overrides.clear()
+        db.close()
+        engine.dispose()
 
 
 def _build_response(service: str) -> dict:
@@ -106,6 +146,70 @@ def test_unified_incident_pipeline_end_to_end(monkeypatch):
 
     assert len(data["evidence"]) >= 1
     assert len(data["recommendations"]) >= 2
+
+
+def test_unified_pipeline_persists_incident(
+    monkeypatch,
+    db_session,
+):
+    """
+    Verify the complete HTTP-to-database persistence path.
+
+    The AI analysis service is mocked, but the real route,
+    Pydantic validation, persistence service, repository,
+    SQLAlchemy model, and database are exercised.
+    """
+
+    def mock_analyze_incident(**kwargs):
+        return _build_response(
+            kwargs["service"],
+        )
+
+    monkeypatch.setattr(
+        incident,
+        "analyze_unified_incident",
+        mock_analyze_incident,
+    )
+
+    response = client.post(
+        "/analyze/incident",
+        json={
+            "service": "payment-service",
+            "cpu": 85,
+            "memory": 90,
+            "logs": "ERROR Redis connection refused",
+        },
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["incident"]["service"] == "payment-service"
+
+    persisted = (
+        db_session.query(Incident)
+        .filter(
+            Incident.service == "payment-service",
+        )
+        .one()
+    )
+
+    assert persisted.id is not None
+    assert persisted.service == "payment-service"
+    assert persisted.severity == "high"
+    assert persisted.confidence == 0.95
+    assert persisted.impact == "high"
+
+    assert (
+        persisted.root_cause
+        == (
+            "Redis connectivity failure is preventing "
+            "the application from establishing its dependency."
+        )
+    )
+
+    assert persisted.root_cause_confidence == 0.95
 
 
 def test_unified_pipeline_preserves_evidence(monkeypatch):
