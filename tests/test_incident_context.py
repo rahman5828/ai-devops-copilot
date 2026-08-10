@@ -108,3 +108,33 @@ def test_context_builds_intelligence_without_docker_evidence():
     assert "runtime" not in context
     assert "signals" not in context
     assert context["intelligence"]["severity"] == "medium"
+
+
+def test_explicit_logs_are_authoritative_over_docker_logs():
+    evidence = make_evidence(
+        logs="Docker collected log",
+    )
+
+    context = build_incident_context(
+        service="payment-service",
+        logs="Explicit application log",
+        docker_evidence=evidence,
+    )
+
+    assert context["evidence"]["logs"] == "Explicit application log"
+
+
+def test_docker_evidence_does_not_replace_explicit_logs():
+    evidence = make_evidence(
+        logs="Docker Redis connection refused",
+    )
+
+    context = build_incident_context(
+        service="payment-service",
+        logs="Application started successfully",
+        docker_evidence=evidence,
+    )
+
+    assert context["evidence"]["logs"] == (
+        "Application started successfully"
+    )
