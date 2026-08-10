@@ -106,9 +106,10 @@ def test_analyze_incident_returns_unified_response(monkeypatch):
     assert result.incident.service == "payment-service"
     assert result.incident.container == "payment-service"
     assert result.severity == "high"
-    assert result.confidence == 0.95
+    assert result.confidence == 0.85
     assert result.impact == "high"
     assert result.root_cause.statement
+    assert result.root_cause.confidence == 0.95
     assert len(result.evidence) == 2
     assert len(result.recommendations) == 2
 
@@ -149,6 +150,45 @@ def test_analyze_incident_does_not_allow_ai_to_downgrade_severity(
     )
 
     assert result.severity == "high"
+
+
+def test_analyze_incident_does_not_allow_ai_to_downgrade_incident_confidence(
+    monkeypatch,
+):
+    context = build_context()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_context",
+        lambda **kwargs: context.copy(),
+    )
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_intelligence",
+        lambda context: {
+            "severity": "high",
+            "confidence": 0.85,
+            "impact": "high",
+        },
+    )
+
+    ai_response = build_ai_response()
+    ai_response["confidence"] = 0.20
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "analyze_with_ai",
+        lambda **kwargs: json.dumps(ai_response),
+    )
+
+    result = incident_analysis.analyze_incident(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+    )
+
+    assert result.confidence == 0.85
+    assert result.root_cause.confidence == 0.20
 
 
 def test_analyze_incident_builds_intelligence_before_ai(

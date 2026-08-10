@@ -32,8 +32,8 @@ def analyze_incident(
     5. Return the unified IncidentAnalysisResponse.
 
     Deterministic infrastructure intelligence remains authoritative for
-    severity. The AI provider is responsible for evidence-backed RCA
-    reasoning and recommendations.
+    severity and incident confidence. The AI provider is responsible for
+    evidence-backed RCA reasoning and root-cause confidence.
     """
 
     context = build_incident_context(
@@ -65,10 +65,7 @@ def analyze_incident(
             "image": incident.get("image"),
         },
         severity=intelligence["severity"],
-        confidence=parsed.get(
-            "confidence",
-            intelligence["confidence"],
-        ),
+        confidence=intelligence["confidence"],
         impact=parsed.get(
             "impact",
             intelligence["impact"],
