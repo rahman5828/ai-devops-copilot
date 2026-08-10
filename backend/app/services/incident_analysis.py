@@ -29,8 +29,9 @@ def analyze_incident(
     2. Calculate deterministic incident intelligence.
     3. Ask the AI provider for evidence-backed RCA.
     4. Normalize the provider response.
-    5. Reconcile AI output against deterministic intelligence.
-    6. Return the unified IncidentAnalysisResponse.
+    5. Validate AI evidence against observable incident evidence.
+    6. Reconcile AI output against deterministic intelligence.
+    7. Return the unified IncidentAnalysisResponse.
 
     Deterministic infrastructure intelligence remains authoritative for
     severity, incident confidence, and impact when the AI attempts to
@@ -57,6 +58,13 @@ def analyze_incident(
 
     parsed = _parse_ai_response(ai_response)
 
+    _validate_ai_evidence(
+        evidence=parsed.get("evidence"),
+        context=context,
+        cpu=cpu,
+        memory=memory,
+    )
+
     incident = context.get("incident", {})
 
     return IncidentAnalysisResponse(
@@ -82,10 +90,7 @@ def analyze_incident(
                 intelligence["confidence"],
             ),
         ),
-        evidence=parsed.get(
-            "evidence",
-            [],
-        ),
+        evidence=parsed["evidence"],
         alternative_hypotheses=parsed.get(
             "alternative_hypotheses",
             [],
@@ -95,6 +100,341 @@ def analyze_incident(
             [],
         ),
     )
+
+
+def _validate_ai_evidence(
+    *,
+    evidence: Any,
+    context: dict[str, Any],
+    cpu: float,
+    memory: float,
+) -> None:
+    """
+    Validate that every AI evidence item is grounded in supplied context.
+
+    The AI may interpret evidence, but it must not manufacture an
+    observation that was never supplied by the application.
+    """
+
+    if not isinstance(evidence, list) or not evidence:
+        raise ValueError(
+            "AI provider returned no evidence."
+        )
+
+    allowed_types = {
+        "log",
+        "runtime",
+        "signal",
+        "metric",
+    }
+
+    for item in evidence:
+        if not isinstance(item, dict):
+            raise ValueError(
+                "AI provider returned an invalid evidence item."
+            )
+
+        evidence_type = item.get("type")
+        observation = item.get("observation")
+
+        if evidence_type not in allowed_types:
+            raise ValueError(
+                "AI provider returned an unsupported evidence type."
+            )
+
+        if not isinstance(observation, str) or not observation.strip():
+            raise ValueError(
+                "AI provider returned an empty evidence observation."
+            )
+
+        if not _evidence_observation_is_supported(
+            evidence_type=evidence_type,
+            observation=observation,
+            context=context,
+            cpu=cpu,
+            memory=memory,
+        ):
+            raise ValueError(
+                "AI provider returned evidence not present in "
+                "the supplied incident context."
+            )
+
+
+def _evidence_observation_is_supported(
+    *,
+    evidence_type: str,
+    observation: str,
+    context: dict[str, Any],
+    cpu: float,
+    memory: float,
+) -> bool:
+    """
+    Determine whether an AI evidence observation is grounded in context.
+    """
+
+    normalized_observation = _normalize_text(observation)
+
+    if not normalized_observation:
+        return False
+
+    if evidence_type == "log":
+        logs = str(
+            context.get("evidence", {}).get("logs", "")
+        )
+
+        return _text_is_supported(
+            observation=normalized_observation,
+            source=logs,
+        )
+
+    if evidence_type == "runtime":
+        runtime = context.get("runtime", {})
+
+        runtime_observations = _runtime_observations(
+            runtime
+        )
+
+        return any(
+            _text_is_supported(
+                observation=normalized_observation,
+                source=source,
+            )
+            for source in runtime_observations
+        )
+
+    if evidence_type == "signal":
+        signals = context.get("signals", [])
+
+        signal_observations = _signal_observations(
+            signals
+        )
+
+        return any(
+            _text_is_supported(
+                observation=normalized_observation,
+                source=source,
+            )
+            for source in signal_observations
+        )
+
+    if evidence_type == "metric":
+        metric_observations = _metric_observations(
+            context=context,
+            cpu=cpu,
+            memory=memory,
+        )
+
+        return any(
+            _text_is_supported(
+                observation=normalized_observation,
+                source=source,
+            )
+            for source in metric_observations
+        )
+
+    return False
+
+
+def _runtime_observations(
+    runtime: dict[str, Any],
+) -> list[str]:
+    """
+    Convert observable runtime state into evidence descriptions.
+    """
+
+    observations: list[str] = []
+
+    status = runtime.get("status")
+
+    if status:
+        observations.append(
+            f"container status {status}"
+        )
+        observations.append(
+            f"container entered a {status} state"
+        )
+
+    restart_count = runtime.get("restart_count")
+
+    if restart_count is not None:
+        observations.append(
+            f"restart count {restart_count}"
+        )
+        observations.append(
+            f"container restarted {restart_count} times"
+        )
+
+    exit_code = runtime.get("exit_code")
+
+    if exit_code is not None:
+        observations.append(
+            f"container exited with code {exit_code}"
+        )
+        observations.append(
+            f"exit code {exit_code}"
+        )
+
+    if runtime.get("oom_killed") is True:
+        observations.extend(
+            [
+                "container was oom killed",
+                "container termination was associated with oom killing",
+                "oom killed",
+            ]
+        )
+
+    return observations
+
+
+def _signal_observations(
+    signals: list[str] | Any,
+) -> list[str]:
+    """
+    Convert deterministic signal names into observable descriptions.
+    """
+
+    signal_descriptions = {
+        "container_restarting": (
+            "container entered a restarting state"
+        ),
+        "non_zero_exit": (
+            "container exited with a non-zero exit code"
+        ),
+        "repeated_restarts": (
+            "repeated container restarts detected"
+        ),
+        "oom_killed": (
+            "container was oom killed"
+        ),
+        "error_logs": (
+            "error-level log evidence was detected"
+        ),
+        "critical_failure": (
+            "critical infrastructure failure detected"
+        ),
+    }
+
+    observations: list[str] = []
+
+    for signal in signals or []:
+        signal_text = str(signal)
+
+        observations.append(signal_text)
+
+        description = signal_descriptions.get(
+            signal_text
+        )
+
+        if description:
+            observations.append(description)
+
+    return observations
+
+
+def _metric_observations(
+    *,
+    context: dict[str, Any],
+    cpu: float,
+    memory: float,
+) -> list[str]:
+    """
+    Convert supplied metrics into observable evidence descriptions.
+
+    Metrics are considered available only when explicitly supplied.
+    """
+
+    observations: list[str] = []
+
+    metrics = context.get("metrics", {})
+
+    supplied_cpu = metrics.get("cpu", cpu)
+    supplied_memory = metrics.get("memory", memory)
+
+    if supplied_cpu is not None:
+        observations.extend(
+            [
+                f"cpu {supplied_cpu}",
+                f"cpu {supplied_cpu}%",
+                f"cpu usage {supplied_cpu}%",
+            ]
+        )
+
+    if supplied_memory is not None:
+        observations.extend(
+            [
+                f"memory {supplied_memory}",
+                f"memory {supplied_memory}%",
+                f"memory usage {supplied_memory}%",
+            ]
+        )
+
+    return observations
+
+
+def _text_is_supported(
+    *,
+    observation: str,
+    source: str,
+) -> bool:
+    """
+    Check whether an observation is grounded in a supplied source.
+
+    We normalize whitespace and punctuation so that harmless formatting
+    differences do not cause valid evidence to be rejected.
+    """
+
+    normalized_source = _normalize_text(source)
+
+    if not normalized_source:
+        return False
+
+    if observation in normalized_source:
+        return True
+
+    observation_tokens = set(
+        observation.split()
+    )
+
+    source_tokens = set(
+        normalized_source.split()
+    )
+
+    if not observation_tokens:
+        return False
+
+    overlap = observation_tokens & source_tokens
+
+    return (
+        len(observation_tokens) >= 2
+        and len(overlap) == len(observation_tokens)
+    )
+
+
+def _normalize_text(value: str) -> str:
+    """
+    Normalize evidence text for deterministic comparison.
+    """
+
+    normalized = " ".join(
+        value.lower().strip().split()
+    )
+
+    punctuation = (
+        ".",
+        ",",
+        ":",
+        ";",
+        "!",
+        "?",
+    )
+
+    for character in punctuation:
+        normalized = normalized.replace(
+            character,
+            "",
+        )
+
+    return normalized
 
 
 def _reconcile_impact(
