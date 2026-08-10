@@ -381,3 +381,40 @@ def test_timeline_does_not_invent_events():
     )
 
     assert timeline == []
+
+def test_analyze_incident_does_not_allow_ai_to_downgrade_impact(
+    monkeypatch,
+):
+    context = build_context()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_context",
+        lambda **kwargs: context.copy(),
+    )
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_intelligence",
+        lambda context: {
+            "severity": "high",
+            "confidence": 0.85,
+            "impact": "high",
+        },
+    )
+
+    ai_response = build_ai_response()
+    ai_response["impact"] = "low"
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "analyze_with_ai",
+        lambda **kwargs: json.dumps(ai_response),
+    )
+
+    result = incident_analysis.analyze_incident(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+    )
+
+    assert result.impact == "high"

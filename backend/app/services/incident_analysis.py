@@ -29,11 +29,12 @@ def analyze_incident(
     2. Calculate deterministic incident intelligence.
     3. Ask the AI provider for evidence-backed RCA.
     4. Normalize the provider response.
-    5. Return the unified IncidentAnalysisResponse.
+    5. Reconcile AI output against deterministic intelligence.
+    6. Return the unified IncidentAnalysisResponse.
 
     Deterministic infrastructure intelligence remains authoritative for
-    severity and incident confidence. The AI provider is responsible for
-    evidence-backed RCA reasoning and root-cause confidence.
+    severity, incident confidence, and impact when the AI attempts to
+    downgrade an objectively observed condition.
     """
 
     context = build_incident_context(
@@ -66,9 +67,9 @@ def analyze_incident(
         },
         severity=intelligence["severity"],
         confidence=intelligence["confidence"],
-        impact=parsed.get(
-            "impact",
-            intelligence["impact"],
+        impact=_reconcile_impact(
+            ai_impact=parsed.get("impact"),
+            deterministic_impact=intelligence["impact"],
         ),
         signals=context.get("signals", []),
         timeline=_build_timeline(
@@ -94,6 +95,34 @@ def analyze_incident(
             [],
         ),
     )
+
+
+def _reconcile_impact(
+    *,
+    ai_impact: Any,
+    deterministic_impact: str,
+) -> str:
+    """
+    Reconcile AI-provided impact with deterministic infrastructure impact.
+
+    Deterministic impact is authoritative when it is higher than the
+    AI-provided assessment. The AI must not downgrade an objectively
+    observed infrastructure impact.
+    """
+
+    impact_order = {
+        "low": 0,
+        "medium": 1,
+        "high": 2,
+    }
+
+    if ai_impact not in impact_order:
+        return deterministic_impact
+
+    if impact_order[ai_impact] < impact_order[deterministic_impact]:
+        return deterministic_impact
+
+    return ai_impact
 
 
 def _parse_ai_response(
