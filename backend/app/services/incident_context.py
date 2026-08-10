@@ -14,29 +14,39 @@ def build_incident_context(
     docker_evidence: DockerEvidence | None = None,
 ) -> dict[str, Any]:
     """
-    Build a structured incident context from available evidence.
+    Build a normalized, structured incident context.
 
     The context contains:
     - incident identity
-    - runtime information
-    - detected signals
+    - runtime information when available
+    - detected signals when available
     - raw logs
     - deterministic incident intelligence
+
+    Deterministic intelligence is calculated only after all
+    observable evidence has been assembled.
     """
+
+    normalized_service = service.strip()
+    normalized_logs = logs or ""
+
+    if not normalized_service:
+        raise ValueError("service must not be empty")
 
     context: dict[str, Any] = {
         "incident": {
-            "service": service,
+            "service": normalized_service,
         },
         "evidence": {
-            "logs": logs,
+            "logs": normalized_logs,
         },
     }
 
     if docker_evidence is not None:
         signals = (
             docker_evidence.signals
-            or detect_docker_signals(docker_evidence)
+            if docker_evidence.signals
+            else detect_docker_signals(docker_evidence)
         )
 
         context["incident"].update(
@@ -53,13 +63,8 @@ def build_incident_context(
             "oom_killed": docker_evidence.oom_killed,
         }
 
-        context["signals"] = signals
+        context["signals"] = list(signals)
 
-        # Deterministic infrastructure assessment.
-        #
-        # This is intentionally calculated before the AI is called.
-        # The AI can reason about the evidence, but it should not
-        # arbitrarily downgrade an objectively severe runtime condition.
-        context["intelligence"] = build_incident_intelligence(context)
+    context["intelligence"] = build_incident_intelligence(context)
 
     return context
