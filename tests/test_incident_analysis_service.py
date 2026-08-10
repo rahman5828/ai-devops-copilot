@@ -418,3 +418,214 @@ def test_analyze_incident_does_not_allow_ai_to_downgrade_impact(
     )
 
     assert result.impact == "high"
+
+def test_validate_ai_evidence_accepts_observable_log(
+    monkeypatch,
+):
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "log",
+            "observation": "Redis connection refused",
+        }
+    ]
+
+    incident_analysis._validate_ai_evidence(
+        evidence=evidence,
+        context=context,
+        cpu=0,
+        memory=0,
+    )
+
+
+def test_validate_ai_evidence_accepts_observable_runtime(
+):
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "runtime",
+            "observation": "Container exited with code 1",
+        }
+    ]
+
+    incident_analysis._validate_ai_evidence(
+        evidence=evidence,
+        context=context,
+        cpu=0,
+        memory=0,
+    )
+
+
+def test_validate_ai_evidence_accepts_observable_signal():
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "signal",
+            "observation": "Repeated container restarts detected",
+        }
+    ]
+
+    incident_analysis._validate_ai_evidence(
+        evidence=evidence,
+        context=context,
+        cpu=0,
+        memory=0,
+    )
+
+
+def test_validate_ai_evidence_rejects_manufactured_log():
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "log",
+            "observation": "PostgreSQL authentication failed",
+        }
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="evidence not present",
+    ):
+        incident_analysis._validate_ai_evidence(
+            evidence=evidence,
+            context=context,
+            cpu=0,
+            memory=0,
+        )
+
+
+def test_validate_ai_evidence_rejects_manufactured_runtime():
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "runtime",
+            "observation": "Container exited with code 137",
+        }
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="evidence not present",
+    ):
+        incident_analysis._validate_ai_evidence(
+            evidence=evidence,
+            context=context,
+            cpu=0,
+            memory=0,
+        )
+
+
+def test_validate_ai_evidence_rejects_metric_not_supplied():
+    context = build_context()
+
+    evidence = [
+        {
+            "type": "metric",
+            "observation": "CPU usage 95%",
+        }
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="evidence not present",
+    ):
+        incident_analysis._validate_ai_evidence(
+            evidence=evidence,
+            context=context,
+            cpu=0,
+            memory=0,
+        )
+
+
+def test_analyze_incident_rejects_manufactured_ai_evidence(
+    monkeypatch,
+):
+    context = build_context()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_context",
+        lambda **kwargs: context.copy(),
+    )
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_intelligence",
+        lambda context: {
+            "severity": "high",
+            "confidence": 0.85,
+            "impact": "high",
+        },
+    )
+
+    ai_response = build_ai_response()
+
+    ai_response["evidence"] = [
+        {
+            "type": "log",
+            "observation": "PostgreSQL authentication failed",
+        }
+    ]
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "analyze_with_ai",
+        lambda **kwargs: json.dumps(ai_response),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="evidence not present",
+    ):
+        incident_analysis.analyze_incident(
+            service="payment-service",
+            logs="ERROR Redis connection refused",
+        )
+
+
+def test_analyze_incident_preserves_valid_ai_evidence(
+    monkeypatch,
+):
+    context = build_context()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_context",
+        lambda **kwargs: context.copy(),
+    )
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_intelligence",
+        lambda context: {
+            "severity": "high",
+            "confidence": 0.85,
+            "impact": "high",
+        },
+    )
+
+    ai_response = build_ai_response()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "analyze_with_ai",
+        lambda **kwargs: json.dumps(ai_response),
+    )
+
+    result = incident_analysis.analyze_incident(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+    )
+
+    assert len(result.evidence) == 2
+    assert result.evidence[0].observation == (
+        "Redis connection refused"
+    )
+    assert result.evidence[1].observation == (
+        "Container exited with code 1"
+    )
