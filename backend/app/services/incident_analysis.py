@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from app.ai.provider import analyze_with_ai
 from app.schemas.incident_analysis import (
     IncidentAnalysisResponse,
     RootCause,
 )
 from app.services.incident_context import build_incident_context
 from app.services.incident_intelligence import build_incident_intelligence
-from app.ai.provider import analyze_with_ai
 
 
 def analyze_incident(
@@ -29,6 +30,10 @@ def analyze_incident(
     3. Ask the AI provider for evidence-backed RCA.
     4. Normalize the provider response.
     5. Return the unified IncidentAnalysisResponse.
+
+    Deterministic infrastructure intelligence remains authoritative for
+    severity. The AI provider is responsible for evidence-backed RCA
+    reasoning and recommendations.
     """
 
     context = build_incident_context(
@@ -52,7 +57,6 @@ def analyze_incident(
     parsed = _parse_ai_response(ai_response)
 
     incident = context.get("incident", {})
-    runtime = context.get("runtime", {})
 
     return IncidentAnalysisResponse(
         incident={
@@ -60,10 +64,7 @@ def analyze_incident(
             "container": incident.get("container"),
             "image": incident.get("image"),
         },
-        severity=parsed.get(
-            "severity",
-            intelligence["severity"],
-        ),
+        severity=intelligence["severity"],
         confidence=parsed.get(
             "confidence",
             intelligence["confidence"],
@@ -111,8 +112,6 @@ def _parse_ai_response(
 
     if isinstance(ai_response, dict):
         return ai_response
-
-    import json
 
     parsed = json.loads(ai_response)
 

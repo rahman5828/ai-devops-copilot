@@ -113,6 +113,44 @@ def test_analyze_incident_returns_unified_response(monkeypatch):
     assert len(result.recommendations) == 2
 
 
+def test_analyze_incident_does_not_allow_ai_to_downgrade_severity(
+    monkeypatch,
+):
+    context = build_context()
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_context",
+        lambda **kwargs: context.copy(),
+    )
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "build_incident_intelligence",
+        lambda context: {
+            "severity": "high",
+            "confidence": 0.85,
+            "impact": "high",
+        },
+    )
+
+    ai_response = build_ai_response()
+    ai_response["severity"] = "low"
+
+    monkeypatch.setattr(
+        incident_analysis,
+        "analyze_with_ai",
+        lambda **kwargs: json.dumps(ai_response),
+    )
+
+    result = incident_analysis.analyze_incident(
+        service="payment-service",
+        logs="ERROR Redis connection refused",
+    )
+
+    assert result.severity == "high"
+
+
 def test_analyze_incident_builds_intelligence_before_ai(
     monkeypatch,
 ):
