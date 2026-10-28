@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.infrastructure.docker.signals import detect_docker_signals
+from app.infrastructure.docker.signals import (
+    detect_docker_signals,
+    detect_log_signals,
+)
 from app.schemas.docker_incident import DockerEvidence
 from app.services.incident_intelligence import build_incident_intelligence
 
@@ -19,7 +22,7 @@ def build_incident_context(
     The context contains:
     - incident identity
     - runtime information when available
-    - detected signals when available
+    - detected deterministic signals
     - raw logs
     - deterministic incident intelligence
 
@@ -63,7 +66,10 @@ def build_incident_context(
             "oom_killed": docker_evidence.oom_killed,
         }
 
-        context["signals"] = list(signals)
+        context["signals"] = list(dict.fromkeys(signals))
+
+    else:
+        context["signals"] = detect_log_signals(normalized_logs)
 
     context["intelligence"] = build_incident_intelligence(context)
 

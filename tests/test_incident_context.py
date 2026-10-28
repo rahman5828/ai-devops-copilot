@@ -34,7 +34,9 @@ def test_builds_context_with_logs_only():
     assert context["evidence"]["logs"] == "ERROR Redis connection refused"
 
     assert "runtime" not in context
-    assert "signals" not in context
+    assert "error_logs" in context["signals"]
+    assert "dependency_connection_failure" in context["signals"]
+    assert context["intelligence"]["severity"] == "medium"
 
 
 def test_builds_context_with_docker_evidence():
@@ -76,6 +78,7 @@ def test_context_prefers_existing_signals():
 
     assert context["signals"] == ["precomputed_signal"]
 
+
 def test_context_normalizes_service_and_logs():
     context = build_incident_context(
         service="  payment-service  ",
@@ -106,7 +109,8 @@ def test_context_builds_intelligence_without_docker_evidence():
     )
 
     assert "runtime" not in context
-    assert "signals" not in context
+    assert "error_logs" in context["signals"]
+    assert "dependency_connection_failure" in context["signals"]
     assert context["intelligence"]["severity"] == "medium"
 
 

@@ -151,6 +151,15 @@ def calculate_impact(context: dict[str, Any]) -> str:
     if status in {"restarting", "dead"}:
         return "high"
 
+    # A dependency failure that prevents startup is a
+    # meaningful service-level impact even when Docker
+    # runtime evidence is unavailable.
+    if "startup_failure" in signals:
+        return "high"
+
+    if "dependency_connection_failure" in signals:
+        return "high"
+
     if "non_zero_exit" in signals:
         return "medium"
 
